@@ -1,20 +1,26 @@
 import { Zero, Schema } from '@rocicorp/zero';
 import { z } from 'zod';
 
-// Define your schema for capturedImages
-const capturedImagesSchema = z.string();
+const capturedImagesSchema = z.object({
+  imageUrl: z.string(),
+  type: z.enum(['face', 'id-front', 'id-back']),
+});
 
 const schema: Schema = {
   tables: {
     capturedImages: {
       name: 'capturedImages',
       columns: {
-        dataUrl: {
+        imageUrl: {
           type: 'string',
-          customType: capturedImagesSchema,
+          customType: capturedImagesSchema.shape.imageUrl,
+        },
+        type: {
+          type: 'string',
+          customType: capturedImagesSchema.shape.type,
         },
       },
-      primaryKey: ['dataUrl'],
+      primaryKey: ['imageUrl'],
     },
   },
   relationships: {},
@@ -40,4 +46,29 @@ export const useZeroClient = async () => {
     });
   }
   return zeroClient;
+};
+
+// Function to save images (selfie, idFront, idBack) into the database
+export const saveCapturedImages = async (selfie: string | null, idFront: string | null, idBack: string | null) => {
+  const zero = await useZeroClient();
+  
+  // Insert new images into capturedImages table
+  await zero.mutate.capturedImages.insert({
+    selfie: selfie ?? '',
+    idFront: idFront ?? '',
+    idBack: idBack ?? '',
+  });
+};
+
+// Function to fetch captured images (selfie, idFront, idBack)
+export const fetchCapturedImages = async () => {
+  const zero = await useZeroClient();
+  const capturedImagesQuery = await zero.query['capturedImages'];
+
+  // Return the captured image URLs
+  return capturedImagesQuery.map((row: any) => ({
+    selfie: row.selfie,
+    idFront: row.idFront,
+    idBack: row.idBack,
+  }));
 };
