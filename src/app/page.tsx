@@ -1,103 +1,146 @@
-import Image from "next/image";
+'use client';
+import React, { useEffect, useRef, useState } from 'react';
+import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision';
+import CameraOverlay from '@/app/components/CameraOverlay';
+import { useRouter } from 'next/navigation';
+import { useZeroClient } from '@/lib/zero';
 
-export default function Home() {
+const CameraPage: React.FC = () => {
+  const router = useRouter();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const photoRef = useRef<HTMLCanvasElement>(null);
+  const faceDetectorRef = useRef<FaceDetector | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const animationFrameId = useRef<number | null>(null);
+
+  const [highlight, setHighlight] = useState(false);
+  const [captured, setCaptured] = useState(false);
+
+  const isFaceInCenter = (box: any, vw: number, vh: number) => {
+    const overlaySize = 240;
+    const centerX = vw / 2;
+    const centerY = vh / 2;
+    const faceCenterX = box.originX + box.width / 2;
+    const faceCenterY = box.originY + box.height / 2;
+    const dx = faceCenterX - centerX;
+    const dy = faceCenterY - centerY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    return distance < overlaySize / 2;
+  };
+
+  useEffect(() => {
+    const initialize = async () => {
+      const filesetResolver = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+      );
+      faceDetectorRef.current = await FaceDetector.createFromOptions(filesetResolver, {
+        baseOptions: {
+          modelAssetPath: 'blaze_face_short_range.tflite',
+        },
+        runningMode: 'VIDEO',
+        minDetectionConfidence: 0.6,
+      });
+
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        detectLoop();
+      }
+    };
+
+    const detectLoop = async () => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const photoCanvas = photoRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (!video || !canvas || !ctx || !faceDetectorRef.current) return;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const runDetection = async () => {
+        if (video.readyState === 4) {
+          const results = await faceDetectorRef.current!.detectForVideo(video, performance.now());
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          const box = results.detections[0]?.boundingBox;
+          if (box) {
+            const inCenter = isFaceInCenter(box, canvas.width, canvas.height);
+            setHighlight(inCenter);
+
+            if (inCenter && !captured) {
+              if (!timeoutRef.current) {
+                timeoutRef.current = setTimeout(async () => {
+                  if (photoCanvas && video) {
+                    photoCanvas.width = video.videoWidth;
+                    photoCanvas.height = video.videoHeight;
+                    const photoCtx = photoCanvas.getContext('2d');
+                    photoCtx?.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+
+                    const dataUrl = photoCanvas.toDataURL('image/jpeg');
+                    const zero = await useZeroClient();
+
+                    // Clear previous images
+                    const existingImages = await zero.query['capturedImages'];
+                    for (const row of existingImages) {
+                      await zero.mutate.capturedImages.delete(row.dataUrl); // Clear the images
+                    }
+
+                    // Insert the new image
+                    await zero.mutate.capturedImages.insert({ dataUrl });
+
+                    console.log("📸 Image captured and stored in Zero.");
+                    setCaptured(true);
+                  }
+                }, 3000);
+              }
+            } else {
+              clearTimeout(timeoutRef.current as NodeJS.Timeout);
+              timeoutRef.current = null;
+            }
+          } else {
+            setHighlight(false);
+            clearTimeout(timeoutRef.current as NodeJS.Timeout);
+            timeoutRef.current = null;
+          }
+        }
+        animationFrameId.current = requestAnimationFrame(runDetection);
+      };
+
+      runDetection();
+    };
+
+    initialize();
+
+    return () => {
+      const stream = videoRef.current?.srcObject as MediaStream;
+      stream?.getTracks().forEach((track) => track.stop());
+      faceDetectorRef.current?.close();
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+    };
+  }, [captured]);
+
+  useEffect(() => {
+    if (captured) {
+      const stream = videoRef.current?.srcObject as MediaStream;
+      stream?.getTracks().forEach((track) => track.stop());
+      faceDetectorRef.current?.close();
+      router.push('/preview');
+    }
+  }, [captured, router]);
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+    <div className="relative w-full h-screen bg-black">
+      <video ref={videoRef} className="absolute w-full h-full object-cover" muted playsInline />
+      <canvas ref={canvasRef} className="absolute w-full h-full z-30" />
+      <CameraOverlay type="face" highlight={highlight} />
+      <canvas ref={photoRef} className="hidden" />
     </div>
   );
-}
+};
+
+export default CameraPage;
