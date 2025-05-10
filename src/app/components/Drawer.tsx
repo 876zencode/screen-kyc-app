@@ -11,24 +11,26 @@ interface DrawerProps {
 
 export function Drawer({ height = 750, onProgressChange, children }: DrawerProps) {
   const constraintsRef = useRef(null);
+  const minY = height / 2.5; // Start and lower limit
 
   return (
     <div ref={constraintsRef} className="fixed inset-0 z-50 touch-none">
       <motion.div
         drag="y"
-        dragConstraints={{ top: 0, bottom: height }}
+        dragConstraints={{ top: 0, bottom: minY }} // Limit dragging to top-half
         dragElastic={0.2}
         onDrag={(event, info) => {
-          const progress = Math.min(1, Math.max(0, info.point.y / height));
-          onProgressChange?.(progress);
+          const rawProgress = Math.min(1, Math.max(0, info.point.y / (height/1.8)));
+          const invertedProgress = 1 - rawProgress;
+          onProgressChange?.(invertedProgress);
         }}
-        initial={{ y: height / 2 }}
+        initial={{ y: minY }}
         className="absolute left-0 right-0 bottom-0 bg-white rounded-t-2xl shadow-xl"
         style={{ height }}
       >
         {/* Top-left extension with a diagonal cut on the right */}
         <div
-          className="absolute -top-10 -left-4 w-88 h-24 bg-white"
+          className="absolute -top-10 -left-4 w-88 h-24 bg-white shadow-xl"
           style={{
             clipPath: 'polygon(0% 0%, 60% 0%, 100% 100%, 0% 100%)',
             borderTopLeftRadius: '1rem',
